@@ -116,6 +116,17 @@ func editorDrawRows(ab *strings.Builder) {
 				welcomeMessage = welcomeMessage[:E.screenCols]
 			}
 
+			padding := (E.screenCols - len(welcomeMessage)) / 2
+			if padding > 0 {
+				ab.WriteByte('~')
+				padding--
+			}
+
+			for padding > 0 {
+				ab.WriteByte(' ')
+				padding--
+			}
+
 			ab.WriteString(welcomeMessage)
 
 		} else {
@@ -138,7 +149,8 @@ func editorRefreshScreen() {
 
 	editorDrawRows(&ab)
 
-	ab.WriteString("\x1b[H")    // cursor to top-left
+	ab.WriteString(fmt.Sprintf("\x1b[%d;%dH", E.cursorY+1, E.cursorX+1)) // set cursor position
+
 	ab.WriteString("\x1b[?25h") // show cursor
 
 	os.Stdout.WriteString(ab.String())
@@ -170,6 +182,8 @@ func editorProcessKey(buf []byte) error {
 // init
 // ----------------------------------------------------------------------------
 func main() {
+	E.cursorX = 0
+	E.cursorY = 0
 	E.fd = int(os.Stdin.Fd())
 
 	var err error
