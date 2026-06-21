@@ -9,8 +9,11 @@ import (
 	"golang.org/x/term"
 )
 
-// @BUG: if called, terminal doesn't go back to cooked mode
+// ----------------------------------------------------------------------------
+// terminal
+// ----------------------------------------------------------------------------
 func die(err error) {
+	// @BUG: if called, terminal doesn't go back to cooked mode
 	fmt.Printf("Encountered error: %s\n", err)
 	os.Exit(1)
 }
@@ -19,7 +22,7 @@ func ctrlKey(c byte) byte {
 	return c & 0x1f
 }
 
-func editorReadKey(fd int, buf []byte) bool{
+func editorReadKey(fd int, buf []byte) bool {
 	// get user input
 	numBytes, err := unix.Read(fd, buf)
 	if err != nil {
@@ -31,23 +34,35 @@ func editorReadKey(fd int, buf []byte) bool{
 	return numBytes != 0
 }
 
+// ----------------------------------------------------------------------------
+// output
+// ----------------------------------------------------------------------------
+func editorRefreshScreen() {
+	os.Stdout.WriteString("\x1b[2J")
+}
+
+// ----------------------------------------------------------------------------
+// input
+// ----------------------------------------------------------------------------
 func editorProcessKey(fd int, buf []byte) bool {
 	running := true
-	if (editorReadKey(fd, buf)) {
+	if editorReadKey(fd, buf) {
 		switch buf[0] {
-			case ctrlKey('q'):
-				fmt.Printf("Bye!\r\n")
-				running = false
-			default:
-				fmt.Printf("%c (%d)\r\n", buf[0], buf[0])
+		case ctrlKey('q'):
+			fmt.Printf("Bye!\r\n")
+			running = false
+		default:
+			fmt.Printf("%c (%d)\r\n", buf[0], buf[0])
 		}
 	}
 
 	return running
 }
 
+// ----------------------------------------------------------------------------
+// init
+// ----------------------------------------------------------------------------
 func main() {
-	// ---------------------------------------------------------------------------
 	// Enable raw mode (i.e. character input doesn't echo) using Go's library
 	// term rather than setting the flags ourselves.
 	fd := int(os.Stdin.Fd()) // file descriptor
@@ -60,7 +75,6 @@ func main() {
 	// Diable raw mode after the program quits. Will still be called on error.
 	defer term.Restore(fd, oldState)
 
-	// ---------------------------------------------------------------------------
 	// grab the current termios so we can update on failed reads
 	t, err := unix.IoctlGetTermios(fd, internal.GetTermios)
 	if err != nil {
@@ -76,11 +90,11 @@ func main() {
 		return
 	}
 
-	// ---------------------------------------------------------------------------
 	// Reader user input, byte-by-byte
 	buf := make([]byte, 1)
 	running := true
 	for running {
+		editorRefreshScreen()
 		running = editorProcessKey(fd, buf)
 	}
 }
