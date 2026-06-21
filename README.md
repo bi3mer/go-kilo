@@ -15,4 +15,12 @@ go build -o go-kilo .
 
 - Error code not return correctly in main errors, so it could get messy if used as a replacement for vim with git.
 
+## Dead Code
+
+```go
+func isCtrl(c byte) bool {
+	return c < 32 || c == 127
+}
+```
+
 [^notoriginal]: I came across [the tutorial for making a tiny text editor](https://viewsourcecode.org/snaptoken/kilo/index.html) while on a train on the way back from a wedding, and thought it may be interesting to follow it in Go. The idea, though, ended up not being original because [someone else already did it](https://github.com/srinathh/gokilo). I haven't followed their implementation since this is about me improving with Go, but the repo from [srinathh](https://github.com/srinathh) may be a better resource since I am a Go novice.

@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"go-kilo/internal"
 	"os"
+	"strings"
 
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
+
+const kiloVersion = "0.0.0"
 
 // ----------------------------------------------------------------------------
 // data
@@ -26,20 +29,8 @@ var E editorConfig
 // ----------------------------------------------------------------------------
 // terminal
 // ----------------------------------------------------------------------------
-func die(err error) {
-	// @BUG: if called, terminal doesn't go back to cooked mode
-	os.Stdout.WriteString("\x1b[2J")
-	os.Stdout.WriteString("\x1b[H")
-	fmt.Printf("Encountered error: %s\n", err)
-	os.Exit(1)
-}
-
 func ctrlKey(c byte) byte {
 	return c & 0x1f
-}
-
-func isCtrl(c byte) bool {
-	return c < 32 || c == 127
 }
 
 func editorReadKey(buf []byte) (bool, error) {
@@ -48,14 +39,19 @@ func editorReadKey(buf []byte) (bool, error) {
 }
 
 func getCursorPosition() error {
-	if n, err := os.Stdout.WriteString("\x1b[6n"); n != 4 {
+	n, err := os.Stdout.WriteString("\x1b[6n")
+	if err != nil {
 		return err
 	}
 
-	os.Stdout.WriteString("\r\n")
-	var buf [1]byte
-	for {
-		n, err := os.Stdin.Read(buf[:])
+	if n != 4 {
+		return fmt.Errorf("getCursorPosition write failed.")
+	}
+
+	var buf [32]byte
+	var i int
+	for i = 0; i < len(buf)-1; i++ {
+		n, err := os.Stdin.Read(buf[i : i+1])
 		if err != nil {
 			return err
 		}
@@ -64,14 +60,25 @@ func getCursorPosition() error {
 			break
 		}
 
-		if isCtrl(buf[0]) {
-			fmt.Printf("%d\r\n", buf[0])
-		} else {
-			fmt.Printf("%d (%c)\r\n", buf[0], buf[0])
+		if buf[i] == 'R' {
+			break
 		}
 	}
 
-	editorReadKey(buf[:])
+	buf[i] = 0
+
+	if buf[0] != '\x1b' || buf[1] != '[' {
+		return fmt.Errorf("getCursorPosition: unexpected response")
+	}
+
+	n, err = fmt.Sscanf(string(buf[2:i]), "%d;%d", &E.screenRows, &E.screenCols)
+	if err != nil {
+		return err
+	}
+
+	if n != 2 {
+		return fmt.Errorf("getCursorPosition: expected 2 values, got %d", n)
+	}
 
 	return nil
 }
@@ -100,17 +107,41 @@ func editorWindowSize() error {
 // ----------------------------------------------------------------------------
 // output
 // ----------------------------------------------------------------------------
-func editorDrawRows() {
-	for range E.screenRows {
-		os.Stdout.WriteString("~\r\n")
+func editorDrawRows(ab *strings.Builder) {
+	for y := range E.screenRows {
+		if y == E.screenRows/3 {
+			welcomeMessage := fmt.Sprintf("Kilo Editor -- v%s", kiloVersion)
+
+			if len(welcomeMessage) > E.screenCols {
+				welcomeMessage = welcomeMessage[:E.screenCols]
+			}
+
+			ab.WriteString(welcomeMessage)
+
+		} else {
+			ab.WriteString("~")
+		}
+
+		ab.WriteString("\x1b[K") // erase terminal row
+
+		if y < E.screenRows-1 {
+			ab.WriteString("\r\n")
+		}
 	}
 }
 
 func editorRefreshScreen() {
-	os.Stdout.WriteString("\x1b[2J")
-	os.Stdout.WriteString("\x1b[H")
-	editorDrawRows()
-	os.Stdout.WriteString("\x1b[H")
+	var ab strings.Builder
+
+	ab.WriteString("\x1b[?25l") // hide cursor
+	ab.WriteString("\x1b[H")    // cursor to top-left
+
+	editorDrawRows(&ab)
+
+	ab.WriteString("\x1b[H")    // cursor to top-left
+	ab.WriteString("\x1b[?25h") // show cursor
+
+	os.Stdout.WriteString(ab.String())
 }
 
 // ----------------------------------------------------------------------------
@@ -129,8 +160,6 @@ func editorProcessKey(buf []byte) error {
 			os.Stdout.WriteString("\x1b[H")
 
 			return fmt.Errorf("User quit.\n")
-		default:
-			fmt.Printf("%c (%d)\r\n", buf[0], buf[0])
 		}
 	}
 
