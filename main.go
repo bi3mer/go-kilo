@@ -9,6 +9,43 @@ import (
 	"golang.org/x/term"
 )
 
+// @BUG: if called, terminal doesn't go back to cooked mode
+func die(err error) {
+	fmt.Printf("Encountered error: %s\n", err)
+	os.Exit(1)
+}
+
+func ctrlKey(c byte) byte {
+	return c & 0x1f
+}
+
+func editorReadKey(fd int, buf []byte) bool{
+	// get user input
+	numBytes, err := unix.Read(fd, buf)
+	if err != nil {
+		die(err)
+	}
+
+	// If numBytes == 0, then time since user input exceeded unix.VTIME max.
+	// So we don't process input and end the loop.
+	return numBytes != 0
+}
+
+func editorProcessKey(fd int, buf []byte) bool {
+	running := true
+	if (editorReadKey(fd, buf)) {
+		switch buf[0] {
+			case ctrlKey('q'):
+				fmt.Printf("Bye!\r\n")
+				running = false
+			default:
+				fmt.Printf("%c (%d)\r\n", buf[0], buf[0])
+		}
+	}
+
+	return running
+}
+
 func main() {
 	// ---------------------------------------------------------------------------
 	// Enable raw mode (i.e. character input doesn't echo) using Go's library
@@ -42,34 +79,8 @@ func main() {
 	// ---------------------------------------------------------------------------
 	// Reader user input, byte-by-byte
 	buf := make([]byte, 1)
-	for {
-		// get user input
-		numBytes, err := unix.Read(fd, buf)
-		if err != nil {
-			fmt.Printf("Encountered error: %s\n", err)
-			return
-		}
-
-		// If numBytes == 0, then time since user input exceeded unix.VTIME max.
-		// So we don't process input and end the loop.
-		if numBytes == 0 {
-			continue
-		}
-
-		// Read input
-		c := buf[0]
-
-		// ctrl + q quits
-		if c == 17 {
-			fmt.Print("Bye!\r\n")
-			break
-		}
-
-		// otherwise just print some stuff
-		if c < 32 || c == 127 { // ctrl + key
-			fmt.Printf("%d\r\n", c)
-		} else {
-			fmt.Printf("%d ('%c')\r\n", c, c)
-		}
+	running := true
+	for running {
+		running = editorProcessKey(fd, buf)
 	}
 }
