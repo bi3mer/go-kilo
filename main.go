@@ -159,6 +159,19 @@ func editorRefreshScreen() {
 // ----------------------------------------------------------------------------
 // input
 // ----------------------------------------------------------------------------
+func editorMoveCursor(key byte) {
+	switch key {
+	case 'a':
+		E.cursorX--
+	case 'd':
+		E.cursorX++
+	case 'w':
+		E.cursorY--
+	case 's':
+		E.cursorY++
+	}
+}
+
 func editorProcessKey(buf []byte) error {
 	bytesToRead, err := editorReadKey(buf)
 	if err != nil {
@@ -172,6 +185,8 @@ func editorProcessKey(buf []byte) error {
 			os.Stdout.WriteString("\x1b[H")
 
 			return fmt.Errorf("User quit.\n")
+		case 'a', 'd', 'w', 's':
+			editorMoveCursor(buf[0])
 		}
 	}
 
