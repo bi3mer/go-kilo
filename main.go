@@ -33,9 +33,53 @@ func ctrlKey(c byte) byte {
 	return c & 0x1f
 }
 
-func editorReadKey(buf []byte) (bool, error) {
-	numBytes, err := unix.Read(E.fd, buf)
-	return numBytes != 0, err
+func editorReadKey(buf []byte) error {
+	for {
+		numBytes, err := unix.Read(E.fd, buf)
+		if err != nil {
+			return err
+		}
+
+		if numBytes > 0 {
+			break
+		}
+	}
+
+	if buf[0] == '\x1b' {
+		var seq [3]byte
+
+		numBytes, err := unix.Read(E.fd, seq[0:1])
+		if err != nil {
+			return err
+		}
+		if numBytes != 1 {
+			return nil
+		}
+
+		numBytes, err = unix.Read(E.fd, seq[1:2])
+		if err != nil {
+			return err
+		}
+		if numBytes != 1 {
+			return nil
+		}
+
+		if seq[0] == '[' {
+			switch seq[1] {
+			case 'A':
+				buf[0] = 'w'
+			case 'B':
+				buf[0] = 's'
+			case 'C':
+				buf[0] = 'd'
+			case 'D':
+				buf[0] = 'a'
+			}
+		}
+
+	}
+
+	return nil
 }
 
 func getCursorPosition() error {
@@ -173,21 +217,19 @@ func editorMoveCursor(key byte) {
 }
 
 func editorProcessKey(buf []byte) error {
-	bytesToRead, err := editorReadKey(buf)
+	err := editorReadKey(buf)
 	if err != nil {
 		return err
 	}
 
-	if bytesToRead {
-		switch buf[0] {
-		case ctrlKey('q'):
-			os.Stdout.WriteString("\x1b[2J")
-			os.Stdout.WriteString("\x1b[H")
+	switch buf[0] {
+	case ctrlKey('q'):
+		os.Stdout.WriteString("\x1b[2J")
+		os.Stdout.WriteString("\x1b[H")
 
-			return fmt.Errorf("User quit.\n")
-		case 'a', 'd', 'w', 's':
-			editorMoveCursor(buf[0])
-		}
+		return fmt.Errorf("User quit.\n")
+	case 'a', 'd', 'w', 's':
+		editorMoveCursor(buf[0])
 	}
 
 	return nil
