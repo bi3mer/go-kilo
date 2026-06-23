@@ -12,6 +12,15 @@ import (
 
 const kiloVersion = "0.0.0"
 
+type EditorKey byte
+
+const (
+	arrowLeft  EditorKey = 'a'
+	arrowRight EditorKey = 'd'
+	arrowUp    EditorKey = 'w'
+	arrowDown  EditorKey = 's'
+)
+
 // ----------------------------------------------------------------------------
 // data
 // ----------------------------------------------------------------------------
@@ -67,13 +76,13 @@ func editorReadKey(buf []byte) error {
 		if seq[0] == '[' {
 			switch seq[1] {
 			case 'A':
-				buf[0] = 'w'
+				buf[0] = byte(arrowUp)
 			case 'B':
-				buf[0] = 's'
+				buf[0] = byte(arrowDown)
 			case 'C':
-				buf[0] = 'd'
+				buf[0] = byte(arrowRight)
 			case 'D':
-				buf[0] = 'a'
+				buf[0] = byte(arrowLeft)
 			}
 		}
 
@@ -205,13 +214,13 @@ func editorRefreshScreen() {
 // ----------------------------------------------------------------------------
 func editorMoveCursor(key byte) {
 	switch key {
-	case 'a':
+	case byte(arrowLeft):
 		E.cursorX--
-	case 'd':
+	case byte(arrowRight):
 		E.cursorX++
-	case 'w':
+	case byte(arrowUp):
 		E.cursorY--
-	case 's':
+	case byte(arrowDown):
 		E.cursorY++
 	}
 }
@@ -228,7 +237,7 @@ func editorProcessKey(buf []byte) error {
 		os.Stdout.WriteString("\x1b[H")
 
 		return fmt.Errorf("User quit.\n")
-	case 'a', 'd', 'w', 's':
+	case byte(arrowLeft), byte(arrowRight), byte(arrowDown), byte(arrowUp):
 		editorMoveCursor(buf[0])
 	}
 
