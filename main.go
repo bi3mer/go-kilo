@@ -12,13 +12,11 @@ import (
 
 const kiloVersion = "0.0.0"
 
-type EditorKey byte
-
 const (
-	arrowLeft  EditorKey = 'a'
-	arrowRight EditorKey = 'd'
-	arrowUp    EditorKey = 'w'
-	arrowDown  EditorKey = 's'
+	arrowLeft = iota + 1000
+	arrowRight
+	arrowUp
+	arrowDown
 )
 
 // ----------------------------------------------------------------------------
@@ -42,11 +40,12 @@ func ctrlKey(c byte) byte {
 	return c & 0x1f
 }
 
-func editorReadKey(buf []byte) error {
+func editorReadKey() (int, error) {
+	var buf [1]byte
 	for {
-		numBytes, err := unix.Read(E.fd, buf)
+		numBytes, err := unix.Read(E.fd, buf[:])
 		if err != nil {
-			return err
+			return -1, err
 		}
 
 		if numBytes > 0 {
@@ -59,36 +58,36 @@ func editorReadKey(buf []byte) error {
 
 		numBytes, err := unix.Read(E.fd, seq[0:1])
 		if err != nil {
-			return err
+			return -1, err
 		}
 		if numBytes != 1 {
-			return nil
+			return '\x1b', nil
 		}
 
 		numBytes, err = unix.Read(E.fd, seq[1:2])
 		if err != nil {
-			return err
+			return -1, err
 		}
 		if numBytes != 1 {
-			return nil
+			return '\x1b', nil
 		}
 
 		if seq[0] == '[' {
 			switch seq[1] {
 			case 'A':
-				buf[0] = byte(arrowUp)
+				return arrowUp, nil
 			case 'B':
-				buf[0] = byte(arrowDown)
+				return arrowDown, nil
 			case 'C':
-				buf[0] = byte(arrowRight)
+				return arrowRight, nil
 			case 'D':
-				buf[0] = byte(arrowLeft)
+				return arrowLeft, nil
 			}
 		}
 
 	}
 
-	return nil
+	return int(buf[0]), nil
 }
 
 func getCursorPosition() error {
@@ -212,33 +211,33 @@ func editorRefreshScreen() {
 // ----------------------------------------------------------------------------
 // input
 // ----------------------------------------------------------------------------
-func editorMoveCursor(key byte) {
+func editorMoveCursor(key int) {
 	switch key {
-	case byte(arrowLeft):
+	case arrowLeft:
 		E.cursorX--
-	case byte(arrowRight):
+	case arrowRight:
 		E.cursorX++
-	case byte(arrowUp):
+	case arrowUp:
 		E.cursorY--
-	case byte(arrowDown):
+	case arrowDown:
 		E.cursorY++
 	}
 }
 
-func editorProcessKey(buf []byte) error {
-	err := editorReadKey(buf)
+func editorProcessKey() error {
+	key, err := editorReadKey()
 	if err != nil {
 		return err
 	}
 
-	switch buf[0] {
-	case ctrlKey('q'):
+	switch key {
+	case int(ctrlKey('q')):
 		os.Stdout.WriteString("\x1b[2J")
 		os.Stdout.WriteString("\x1b[H")
 
 		return fmt.Errorf("User quit.\n")
-	case byte(arrowLeft), byte(arrowRight), byte(arrowDown), byte(arrowUp):
-		editorMoveCursor(buf[0])
+	case arrowLeft, arrowRight, arrowDown, arrowUp:
+		editorMoveCursor(key)
 	}
 
 	return nil
@@ -285,10 +284,9 @@ func main() {
 		return
 	}
 
-	buf := make([]byte, 1)
 	for {
 		editorRefreshScreen()
-		err := editorProcessKey(buf)
+		err := editorProcessKey()
 		if err != nil {
 			fmt.Printf("%s\n", err)
 			break
