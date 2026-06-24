@@ -214,13 +214,13 @@ func editorRefreshScreen() {
 func editorMoveCursor(key int) {
 	switch key {
 	case arrowLeft:
-		E.cursorX--
+		E.cursorX = max(0, E.cursorX-1)
 	case arrowRight:
-		E.cursorX++
+		E.cursorX = min(E.cursorX+1, E.screenCols-1)
 	case arrowUp:
-		E.cursorY--
+		E.cursorY = max(0, E.cursorY-1)
 	case arrowDown:
-		E.cursorY++
+		E.cursorY = min(E.cursorY+1, E.screenRows-1)
 	}
 }
 
