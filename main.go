@@ -17,6 +17,8 @@ const (
 	arrowRight
 	arrowUp
 	arrowDown
+	pageUp
+	pageDown
 )
 
 // ----------------------------------------------------------------------------
@@ -73,16 +75,37 @@ func editorReadKey() (int, error) {
 		}
 
 		if seq[0] == '[' {
-			switch seq[1] {
-			case 'A':
-				return arrowUp, nil
-			case 'B':
-				return arrowDown, nil
-			case 'C':
-				return arrowRight, nil
-			case 'D':
-				return arrowLeft, nil
+			if seq[1] >= '0' && seq[1] <= '9' {
+				numBytes, err = unix.Read(E.fd, seq[2:3])
+				if err != nil {
+					return -1, err
+				}
+				if numBytes != 1 {
+					return '\x1b', nil
+				}
+
+				if seq[2] == '~' {
+					switch seq[1] {
+					case '5':
+						return pageUp, nil
+					case '6':
+						return pageDown, nil
+					}
+				}
+			} else {
+				switch seq[1] {
+				case 'A':
+					return arrowUp, nil
+				case 'B':
+					return arrowDown, nil
+				case 'C':
+					return arrowRight, nil
+				case 'D':
+					return arrowLeft, nil
+				}
 			}
+
+			return '\x1b', nil
 		}
 
 	}
@@ -236,6 +259,19 @@ func editorProcessKey() error {
 		os.Stdout.WriteString("\x1b[H")
 
 		return fmt.Errorf("User quit.\n")
+
+	case pageUp, pageDown:
+		var press int
+		if key == pageUp {
+			press = arrowUp
+		} else {
+			press = arrowDown
+		}
+
+		for range E.screenRows {
+			editorMoveCursor(press)
+		}
+
 	case arrowLeft, arrowRight, arrowDown, arrowUp:
 		editorMoveCursor(key)
 	}
