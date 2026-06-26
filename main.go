@@ -17,6 +17,8 @@ const (
 	arrowRight
 	arrowUp
 	arrowDown
+	homeKey
+	endKey
 	pageUp
 	pageDown
 )
@@ -86,10 +88,18 @@ func editorReadKey() (int, error) {
 
 				if seq[2] == '~' {
 					switch seq[1] {
+					case '1':
+						return homeKey, nil
+					case '4':
+						return endKey, nil
 					case '5':
 						return pageUp, nil
 					case '6':
 						return pageDown, nil
+					case '7':
+						return homeKey, nil
+					case '8':
+						return endKey, nil
 					}
 				}
 			} else {
@@ -102,12 +112,22 @@ func editorReadKey() (int, error) {
 					return arrowRight, nil
 				case 'D':
 					return arrowLeft, nil
+				case 'H':
+					return homeKey, nil
+				case 'F':
+					return endKey, nil
 				}
 			}
-
-			return '\x1b', nil
+		} else if seq[0] == 'O' {
+			switch seq[1] {
+			case 'H':
+				return homeKey, nil
+			case 'F':
+				return endKey, nil
+			}
 		}
 
+		return '\x1b', nil
 	}
 
 	return int(buf[0]), nil
@@ -120,13 +140,13 @@ func getCursorPosition() error {
 	}
 
 	if n != 4 {
-		return fmt.Errorf("getCursorPosition write failed.")
+		return fmt.Errorf("getCursorPosition: write failed")
 	}
 
 	var buf [32]byte
 	var i int
 	for i = 0; i < len(buf)-1; i++ {
-		n, err := os.Stdin.Read(buf[i : i+1])
+		n, err := unix.Read(E.fd, buf[i:i+1])
 		if err != nil {
 			return err
 		}
@@ -161,16 +181,15 @@ func getCursorPosition() error {
 func editorWindowSize() error {
 	ws, err := unix.IoctlGetWinsize(E.fd, unix.TIOCGWINSZ)
 	if err != nil {
-		if n, err := os.Stdout.WriteString("\x1b[999C\x1b[999B"); n != 12 {
-			fmt.Printf("Error: %s\n", err)
-			return fmt.Errorf("getCursorPosition: write failed")
+		if n, err := os.Stdout.WriteString("\x1b[999C\x1b[999B"); err != nil || n != 12 {
+			return fmt.Errorf("getCursorPosition: write failed: %w", err)
 		}
 
 		return getCursorPosition()
 	}
 
 	if ws.Col == 0 || ws.Row == 0 {
-		return fmt.Errorf("Window size too small.\n")
+		return fmt.Errorf("window size too small")
 	}
 
 	E.screenRows = int(ws.Row)
@@ -228,7 +247,7 @@ func editorRefreshScreen() {
 
 	ab.WriteString("\x1b[?25h") // show cursor
 
-	os.Stdout.WriteString(ab.String())
+	_, _ = os.Stdout.WriteString(ab.String())
 }
 
 // ----------------------------------------------------------------------------
@@ -255,10 +274,16 @@ func editorProcessKey() error {
 
 	switch key {
 	case int(ctrlKey('q')):
-		os.Stdout.WriteString("\x1b[2J")
-		os.Stdout.WriteString("\x1b[H")
+		_, _ = os.Stdout.WriteString("\x1b[2J")
+		_, _ = os.Stdout.WriteString("\x1b[H")
 
-		return fmt.Errorf("User quit.\n")
+		return fmt.Errorf("user quit")
+
+	case homeKey:
+		E.cursorX = 0
+
+	case endKey:
+		E.cursorX = E.screenCols - 1
 
 	case pageUp, pageDown:
 		var press int
@@ -290,14 +315,14 @@ func main() {
 	var err error
 	E.state, err = term.MakeRaw(E.fd)
 	if err != nil {
-		fmt.Printf("Unable to interact with terminal: %s\n", err)
+		fmt.Fprintf(os.Stderr,"Unable to interact with terminal: %s\n", err)
 		return
 	}
 	defer term.Restore(E.fd, E.state)
 
 	t, err := unix.IoctlGetTermios(E.fd, internal.GetTermios)
 	if err != nil {
-		fmt.Printf("unix.IoctlGetTermios error: %s\n", err)
+		fmt.Fprintf(os.Stderr,"unix.IoctlGetTermios error: %s\n", err)
 		return
 	}
 
@@ -305,18 +330,18 @@ func main() {
 	t.Cc[unix.VTIME] = 1
 
 	if err := unix.IoctlSetTermios(E.fd, internal.SetTermios, t); err != nil {
-		fmt.Printf("unix.IoctlSetTermios error: %s\n", err)
+		fmt.Fprintf(os.Stderr,"unix.IoctlSetTermios error: %s\n", err)
 		return
 	}
 
 	err = editorWindowSize()
 	if err != nil {
-		fmt.Printf("Failed to find window: %s\n", err)
+		fmt.Fprintf(os.Stderr,"Failed to find window: %s\n", err)
 		return
 	}
 
 	if E.screenCols == 0 || E.screenRows == 0 {
-		fmt.Printf("Window too small")
+		fmt.Fprintf(os.Stderr,"Window too small")
 		return
 	}
 
@@ -324,7 +349,7 @@ func main() {
 		editorRefreshScreen()
 		err := editorProcessKey()
 		if err != nil {
-			fmt.Printf("%s\n", err)
+			fmt.Fprintf(os.Stderr,"%s\n", err)
 			break
 		}
 	}
