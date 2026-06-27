@@ -17,6 +17,7 @@ const (
 	arrowRight
 	arrowUp
 	arrowDown
+	delKey
 	homeKey
 	endKey
 	pageUp
@@ -33,9 +34,17 @@ type editorConfig struct {
 	screenCols int
 	fd         int
 	state      *term.State
+	rows       []string
 }
 
 var E editorConfig
+
+// ----------------------------------------------------------------------------
+// file i/o
+// ----------------------------------------------------------------------------
+func editorOpen() {
+	E.rows = append(E.rows, "Hello, World!")
+}
 
 // ----------------------------------------------------------------------------
 // terminal
@@ -90,6 +99,8 @@ func editorReadKey() (int, error) {
 					switch seq[1] {
 					case '1':
 						return homeKey, nil
+					case '3':
+						return delKey, nil
 					case '4':
 						return endKey, nil
 					case '5':
@@ -203,32 +214,41 @@ func editorWindowSize() error {
 // ----------------------------------------------------------------------------
 func editorDrawRows(ab *strings.Builder) {
 	for y := range E.screenRows {
-		if y == E.screenRows/3 {
-			welcomeMessage := fmt.Sprintf("Kilo Editor -- v%s", kiloVersion)
+		if y >= len(E.rows) {
+			if y == E.screenRows/3 {
+				welcomeMessage := fmt.Sprintf("Kilo Editor -- v%s", kiloVersion)
 
-			if len(welcomeMessage) > E.screenCols {
-				welcomeMessage = welcomeMessage[:E.screenCols]
+				if len(welcomeMessage) > E.screenCols {
+					welcomeMessage = welcomeMessage[:E.screenCols]
+				}
+
+				padding := (E.screenCols - len(welcomeMessage)) / 2
+				if padding > 0 {
+					ab.WriteByte('~')
+					padding--
+				}
+
+				for padding > 0 {
+					ab.WriteByte(' ')
+					padding--
+				}
+
+				ab.WriteString(welcomeMessage)
+
+			} else {
+				ab.WriteString("~")
 			}
-
-			padding := (E.screenCols - len(welcomeMessage)) / 2
-			if padding > 0 {
-				ab.WriteByte('~')
-				padding--
-			}
-
-			for padding > 0 {
-				ab.WriteByte(' ')
-				padding--
-			}
-
-			ab.WriteString(welcomeMessage)
-
 		} else {
-			ab.WriteString("~")
+			// TODO: wrapping?
+			row := E.rows[y]
+			if len(row) > E.screenCols {
+				row = row[:E.screenCols] // prune lines too long for now
+			}
+
+			ab.WriteString(row)
 		}
 
 		ab.WriteString("\x1b[K") // erase terminal row
-
 		if y < E.screenRows-1 {
 			ab.WriteString("\r\n")
 		}
@@ -315,14 +335,14 @@ func main() {
 	var err error
 	E.state, err = term.MakeRaw(E.fd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr,"Unable to interact with terminal: %s\n", err)
+		fmt.Fprintf(os.Stderr, "Unable to interact with terminal: %s\n", err)
 		return
 	}
 	defer term.Restore(E.fd, E.state)
 
 	t, err := unix.IoctlGetTermios(E.fd, internal.GetTermios)
 	if err != nil {
-		fmt.Fprintf(os.Stderr,"unix.IoctlGetTermios error: %s\n", err)
+		fmt.Fprintf(os.Stderr, "unix.IoctlGetTermios error: %s\n", err)
 		return
 	}
 
@@ -330,26 +350,28 @@ func main() {
 	t.Cc[unix.VTIME] = 1
 
 	if err := unix.IoctlSetTermios(E.fd, internal.SetTermios, t); err != nil {
-		fmt.Fprintf(os.Stderr,"unix.IoctlSetTermios error: %s\n", err)
+		fmt.Fprintf(os.Stderr, "unix.IoctlSetTermios error: %s\n", err)
 		return
 	}
 
 	err = editorWindowSize()
 	if err != nil {
-		fmt.Fprintf(os.Stderr,"Failed to find window: %s\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to find window: %s\n", err)
 		return
 	}
 
 	if E.screenCols == 0 || E.screenRows == 0 {
-		fmt.Fprintf(os.Stderr,"Window too small")
+		fmt.Fprintf(os.Stderr, "Window too small")
 		return
 	}
+
+	editorOpen()
 
 	for {
 		editorRefreshScreen()
 		err := editorProcessKey()
 		if err != nil {
-			fmt.Fprintf(os.Stderr,"%s\n", err)
+			fmt.Fprintf(os.Stderr, "%s\n", err)
 			break
 		}
 	}
