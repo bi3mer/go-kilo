@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"go-kilo/internal"
 	"os"
@@ -42,8 +43,24 @@ var E editorConfig
 // ----------------------------------------------------------------------------
 // file i/o
 // ----------------------------------------------------------------------------
-func editorOpen() {
-	E.rows = append(E.rows, "Hello, World!")
+func editorOpen(fileName string) error {
+	f, err := os.Open(fileName)
+	if err != nil {
+		return err
+	}
+
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		E.rows = append(E.rows, scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // ----------------------------------------------------------------------------
@@ -215,7 +232,7 @@ func editorWindowSize() error {
 func editorDrawRows(ab *strings.Builder) {
 	for y := range E.screenRows {
 		if y >= len(E.rows) {
-			if y == E.screenRows/3 {
+			if len(E.rows) == 0 && y == E.screenRows/3 {
 				welcomeMessage := fmt.Sprintf("Kilo Editor -- v%s", kiloVersion)
 
 				if len(welcomeMessage) > E.screenCols {
@@ -365,13 +382,21 @@ func main() {
 		return
 	}
 
-	editorOpen()
+	if len(os.Args) >= 2 {
+		err = editorOpen(os.Args[1])
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%v", err)
+			return
+		}
+	}
 
 	for {
 		editorRefreshScreen()
+
 		err := editorProcessKey()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err)
+			fmt.Fprintf(os.Stderr, "%v\n", err)
 			break
 		}
 	}
