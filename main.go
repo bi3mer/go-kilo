@@ -31,6 +31,7 @@ const (
 type editorConfig struct {
 	cursorX    int
 	cursorY    int
+	rowOff     int
 	screenRows int
 	screenCols int
 	fd         int
@@ -229,9 +230,20 @@ func editorWindowSize() error {
 // ----------------------------------------------------------------------------
 // output
 // ----------------------------------------------------------------------------
+func editorScroll() {
+	if E.cursorY < E.rowOff {
+		E.rowOff = E.cursorY
+	}
+
+	if E.cursorY >= E.rowOff+E.screenRows {
+		E.rowOff = E.cursorY - E.screenRows + 1
+	}
+}
+
 func editorDrawRows(ab *strings.Builder) {
 	for y := range E.screenRows {
-		if y >= len(E.rows) {
+		fileRow := y + E.rowOff
+		if fileRow >= len(E.rows) {
 			if len(E.rows) == 0 && y == E.screenRows/3 {
 				welcomeMessage := fmt.Sprintf("Kilo Editor -- v%s", kiloVersion)
 
@@ -257,7 +269,7 @@ func editorDrawRows(ab *strings.Builder) {
 			}
 		} else {
 			// TODO: wrapping?
-			row := E.rows[y]
+			row := E.rows[fileRow]
 			if len(row) > E.screenCols {
 				row = row[:E.screenCols] // prune lines too long for now
 			}
@@ -273,6 +285,8 @@ func editorDrawRows(ab *strings.Builder) {
 }
 
 func editorRefreshScreen() {
+	editorScroll()
+
 	var ab strings.Builder
 
 	ab.WriteString("\x1b[?25l") // hide cursor
@@ -280,7 +294,7 @@ func editorRefreshScreen() {
 
 	editorDrawRows(&ab)
 
-	ab.WriteString(fmt.Sprintf("\x1b[%d;%dH", E.cursorY+1, E.cursorX+1)) // set cursor position
+	ab.WriteString(fmt.Sprintf("\x1b[%d;%dH", (E.cursorY-E.rowOff)+1, E.cursorX+1)) // set cursor position
 
 	ab.WriteString("\x1b[?25h") // show cursor
 
@@ -299,7 +313,9 @@ func editorMoveCursor(key int) {
 	case arrowUp:
 		E.cursorY = max(0, E.cursorY-1)
 	case arrowDown:
-		E.cursorY = min(E.cursorY+1, E.screenRows-1)
+		if E.cursorY < len(E.rows) {
+			E.cursorY++
+		}
 	}
 }
 
