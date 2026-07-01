@@ -32,6 +32,7 @@ type editorConfig struct {
 	cursorX    int
 	cursorY    int
 	rowOff     int
+	colOff     int
 	screenRows int
 	screenCols int
 	fd         int
@@ -238,6 +239,14 @@ func editorScroll() {
 	if E.cursorY >= E.rowOff+E.screenRows {
 		E.rowOff = E.cursorY - E.screenRows + 1
 	}
+
+	if E.cursorX < E.colOff {
+		E.colOff = E.cursorX
+	}
+
+	if E.cursorX >= E.colOff+E.screenCols {
+		E.colOff = E.cursorX - E.screenCols + 1
+	}
 }
 
 func editorDrawRows(ab *strings.Builder) {
@@ -268,10 +277,14 @@ func editorDrawRows(ab *strings.Builder) {
 				ab.WriteString("~")
 			}
 		} else {
-			// TODO: wrapping?
+			// prune lines too long for now
 			row := E.rows[fileRow]
-			if len(row) > E.screenCols {
-				row = row[:E.screenCols] // prune lines too long for now
+
+			if E.colOff < len(row) {
+				length := min(len(row)-E.colOff, E.screenCols)
+				row = row[E.colOff : E.colOff+length]
+			} else {
+				row = ""
 			}
 
 			ab.WriteString(row)
@@ -294,7 +307,8 @@ func editorRefreshScreen() {
 
 	editorDrawRows(&ab)
 
-	ab.WriteString(fmt.Sprintf("\x1b[%d;%dH", (E.cursorY-E.rowOff)+1, E.cursorX+1)) // set cursor position
+	// set cursor position
+	ab.WriteString(fmt.Sprintf("\x1b[%d;%dH", (E.cursorY-E.rowOff)+1, (E.cursorX-E.colOff)+1))
 
 	ab.WriteString("\x1b[?25h") // show cursor
 
@@ -307,15 +321,36 @@ func editorRefreshScreen() {
 func editorMoveCursor(key int) {
 	switch key {
 	case arrowLeft:
-		E.cursorX = max(0, E.cursorX-1)
+		if E.cursorX != 0 {
+			E.cursorX--
+		} else if E.cursorY > 0 {
+			E.cursorY--
+			E.cursorX = len(E.rows[E.cursorY])
+		}
 	case arrowRight:
-		E.cursorX = min(E.cursorX+1, E.screenCols-1)
+		if E.cursorY < len(E.rows) {
+			if E.cursorX < len(E.rows[E.cursorY]) {
+				E.cursorX++
+			} else if E.cursorX == len(E.rows[E.cursorY]) {
+				E.cursorY++
+				E.cursorX = 0
+			}
+		}
 	case arrowUp:
 		E.cursorY = max(0, E.cursorY-1)
 	case arrowDown:
 		if E.cursorY < len(E.rows) {
 			E.cursorY++
 		}
+	}
+
+	rowLen := 0
+	if E.cursorY < len(E.rows) {
+		rowLen = len(E.rows[E.cursorY])
+	}
+
+	if E.cursorX > rowLen {
+		E.cursorX = rowLen
 	}
 }
 
