@@ -11,7 +11,10 @@ import (
 	"golang.org/x/term"
 )
 
-const kiloVersion = "0.0.0"
+const (
+	kiloVersion = "0.0.0"
+	tabLength   = 8
+)
 
 const (
 	arrowLeft = iota + 1000
@@ -31,6 +34,7 @@ const (
 type editorConfig struct {
 	cursorX    int
 	cursorY    int
+	rowX       int
 	rowOff     int
 	colOff     int
 	screenRows int
@@ -38,9 +42,45 @@ type editorConfig struct {
 	fd         int
 	state      *term.State
 	rows       []string
+	render     []string
 }
 
 var E editorConfig
+
+// ----------------------------------------------------------------------------
+// row operations
+// ----------------------------------------------------------------------------
+func editorRowCursorXToRenderX(row string, cx int) int {
+	rx := 0
+
+	for j := 0; j < cx; j++ {
+		if row[j] == '\t' {
+			rx += (tabLength - 1) - (rx % tabLength)
+		}
+
+		rx++
+	}
+
+	return rx
+}
+
+func editorUpdateRow(row string) string {
+	var builder strings.Builder
+
+	for _, r := range row {
+		if r == '\t' {
+			builder.WriteByte(' ')
+
+			for builder.Len()%tabLength != 0 {
+				builder.WriteByte(' ')
+			}
+		} else {
+			builder.WriteRune(r)
+		}
+	}
+
+	return builder.String()
+}
 
 // ----------------------------------------------------------------------------
 // file i/o
@@ -55,7 +95,9 @@ func editorOpen(fileName string) error {
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		E.rows = append(E.rows, scanner.Text())
+		line := scanner.Text()
+		E.rows = append(E.rows, line)
+		E.render = append(E.render, editorUpdateRow(line))
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -232,6 +274,12 @@ func editorWindowSize() error {
 // output
 // ----------------------------------------------------------------------------
 func editorScroll() {
+	if E.cursorY < len(E.rows) {
+		E.rowX = editorRowCursorXToRenderX(E.rows[E.cursorY], E.cursorX)
+	} else {
+		E.rowX = 0
+	}
+
 	if E.cursorY < E.rowOff {
 		E.rowOff = E.cursorY
 	}
@@ -240,12 +288,12 @@ func editorScroll() {
 		E.rowOff = E.cursorY - E.screenRows + 1
 	}
 
-	if E.cursorX < E.colOff {
-		E.colOff = E.cursorX
+	if E.rowX < E.colOff {
+		E.colOff = E.rowX
 	}
 
-	if E.cursorX >= E.colOff+E.screenCols {
-		E.colOff = E.cursorX - E.screenCols + 1
+	if E.rowX >= E.colOff+E.screenCols {
+		E.colOff = E.rowX - E.screenCols + 1
 	}
 }
 
@@ -278,7 +326,7 @@ func editorDrawRows(ab *strings.Builder) {
 			}
 		} else {
 			// prune lines too long for now
-			row := E.rows[fileRow]
+			row := E.render[fileRow]
 
 			if E.colOff < len(row) {
 				length := min(len(row)-E.colOff, E.screenCols)
@@ -308,7 +356,7 @@ func editorRefreshScreen() {
 	editorDrawRows(&ab)
 
 	// set cursor position
-	ab.WriteString(fmt.Sprintf("\x1b[%d;%dH", (E.cursorY-E.rowOff)+1, (E.cursorX-E.colOff)+1))
+	ab.WriteString(fmt.Sprintf("\x1b[%d;%dH", (E.cursorY-E.rowOff)+1, (E.rowX-E.colOff)+1))
 
 	ab.WriteString("\x1b[?25h") // show cursor
 
