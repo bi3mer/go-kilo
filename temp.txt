@@ -5,18 +5,13 @@ import (
 	"fmt"
 	"go-kilo/internal"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
-const (
-	kiloVersion = "0.0.0"
-	tabLength   = 8
-)
+const kiloVersion = "0.0.0"
 
 const (
 	arrowLeft = iota + 1000
@@ -34,58 +29,17 @@ const (
 // data
 // ----------------------------------------------------------------------------
 type editorConfig struct {
-	cursorX       int
-	cursorY       int
-	rowX          int
-	rowOff        int
-	colOff        int
-	screenRows    int
-	screenCols    int
-	fd            int
-	state         *term.State
-	statusMsg     string
-	statusMsgTime time.Time
-	fileName      string
-	rows          []string
-	render        []string
+	cursorX    int
+	cursorY    int
+	rowOff     int
+	screenRows int
+	screenCols int
+	fd         int
+	state      *term.State
+	rows       []string
 }
 
 var E editorConfig
-
-// ----------------------------------------------------------------------------
-// row operations
-// ----------------------------------------------------------------------------
-func editorRowCursorXToRenderX(row string, cx int) int {
-	rx := 0
-
-	for j := 0; j < cx; j++ {
-		if row[j] == '\t' {
-			rx += (tabLength - 1) - (rx % tabLength)
-		}
-
-		rx++
-	}
-
-	return rx
-}
-
-func editorUpdateRow(row string) string {
-	var builder strings.Builder
-
-	for _, r := range row {
-		if r == '\t' {
-			builder.WriteByte(' ')
-
-			for builder.Len()%tabLength != 0 {
-				builder.WriteByte(' ')
-			}
-		} else {
-			builder.WriteRune(r)
-		}
-	}
-
-	return builder.String()
-}
 
 // ----------------------------------------------------------------------------
 // file i/o
@@ -97,13 +51,10 @@ func editorOpen(fileName string) error {
 	}
 
 	defer f.Close()
-	E.fileName = fileName
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		line := scanner.Text()
-		E.rows = append(E.rows, line)
-		E.render = append(E.render, editorUpdateRow(line))
+		E.rows = append(E.rows, scanner.Text())
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -280,26 +231,12 @@ func editorWindowSize() error {
 // output
 // ----------------------------------------------------------------------------
 func editorScroll() {
-	if E.cursorY < len(E.rows) {
-		E.rowX = editorRowCursorXToRenderX(E.rows[E.cursorY], E.cursorX)
-	} else {
-		E.rowX = 0
-	}
-
 	if E.cursorY < E.rowOff {
 		E.rowOff = E.cursorY
 	}
 
 	if E.cursorY >= E.rowOff+E.screenRows {
 		E.rowOff = E.cursorY - E.screenRows + 1
-	}
-
-	if E.rowX < E.colOff {
-		E.colOff = E.rowX
-	}
-
-	if E.rowX >= E.colOff+E.screenCols {
-		E.colOff = E.rowX - E.screenCols + 1
 	}
 }
 
@@ -331,59 +268,20 @@ func editorDrawRows(ab *strings.Builder) {
 				ab.WriteString("~")
 			}
 		} else {
-			// prune lines too long for now
-			row := E.render[fileRow]
-
-			if E.colOff < len(row) {
-				length := min(len(row)-E.colOff, E.screenCols)
-				row = row[E.colOff : E.colOff+length]
-			} else {
-				row = ""
+			// TODO: wrapping?
+			row := E.rows[fileRow]
+			if len(row) > E.screenCols {
+				row = row[:E.screenCols] // prune lines too long for now
 			}
 
 			ab.WriteString(row)
 		}
 
 		ab.WriteString("\x1b[K") // erase terminal row
-		ab.WriteString("\r\n")
-	}
-}
-
-func editorDrawStatusBar(ab *strings.Builder) {
-	ab.WriteString("\x1b[7m")
-
-	// draw file name
-	var length int
-	if E.fileName == "" {
-		ab.WriteString("[No Name]")
-		length = 9
-	} else {
-		var temp strings.Builder
-		temp.WriteString(E.fileName)
-		temp.WriteString(" - ")
-		temp.WriteString(strconv.Itoa(len(E.rows)))
-		temp.WriteString(" lines")
-
-		length = min(E.screenCols, temp.Len())
-		ab.WriteString(temp.String()[:length])
-	}
-
-	var lineCount strings.Builder
-	lineCount.WriteString(strconv.Itoa(E.cursorY + 1))
-	lineCount.WriteByte('/')
-	lineCount.WriteString(strconv.Itoa(len(E.rows)))
-
-	for i := range E.screenCols - length {
-		if i == E.screenCols-length-lineCount.Len() {
-			ab.WriteString(lineCount.String())
-			break
-		} else {
-			ab.WriteByte(' ')
+		if y < E.screenRows-1 {
+			ab.WriteString("\r\n")
 		}
 	}
-
-	ab.WriteString("\x1b[m")
-	ab.WriteString("\r\n")
 }
 
 func editorRefreshScreen() {
@@ -395,24 +293,12 @@ func editorRefreshScreen() {
 	ab.WriteString("\x1b[H")    // cursor to top-left
 
 	editorDrawRows(&ab)
-	editorDrawStatusBar(&ab)
 
-	// set cursor position
-	ab.WriteString(fmt.Sprintf("\x1b[%d;%dH", (E.cursorY-E.rowOff)+1, (E.rowX-E.colOff)+1))
+	ab.WriteString(fmt.Sprintf("\x1b[%d;%dH", E.cursorY+1, E.cursorX+1)) // set cursor position
 
 	ab.WriteString("\x1b[?25h") // show cursor
 
 	_, _ = os.Stdout.WriteString(ab.String())
-}
-
-// TODO: make variadic once a caller needs formatted args:
-// func editorSetStatusMessage(format string, args ...any) {
-// 	E.statusMsg = fmt.Sprintf(format, args...)
-// 	E.statusMsgTime = time.Now()
-// }
-func editorSetStatusMessage(msg string) {
-	E.statusMsg = msg
-	E.statusMsgTime = time.Now()
 }
 
 // ----------------------------------------------------------------------------
@@ -421,36 +307,15 @@ func editorSetStatusMessage(msg string) {
 func editorMoveCursor(key int) {
 	switch key {
 	case arrowLeft:
-		if E.cursorX != 0 {
-			E.cursorX--
-		} else if E.cursorY > 0 {
-			E.cursorY--
-			E.cursorX = len(E.rows[E.cursorY])
-		}
+		E.cursorX = max(0, E.cursorX-1)
 	case arrowRight:
-		if E.cursorY < len(E.rows) {
-			if E.cursorX < len(E.rows[E.cursorY]) {
-				E.cursorX++
-			} else if E.cursorX == len(E.rows[E.cursorY]) {
-				E.cursorY++
-				E.cursorX = 0
-			}
-		}
+		E.cursorX = min(E.cursorX+1, E.screenCols-1)
 	case arrowUp:
 		E.cursorY = max(0, E.cursorY-1)
 	case arrowDown:
 		if E.cursorY < len(E.rows) {
 			E.cursorY++
 		}
-	}
-
-	rowLen := 0
-	if E.cursorY < len(E.rows) {
-		rowLen = len(E.rows[E.cursorY])
-	}
-
-	if E.cursorX > rowLen {
-		E.cursorX = rowLen
 	}
 }
 
@@ -471,22 +336,13 @@ func editorProcessKey() error {
 		E.cursorX = 0
 
 	case endKey:
-		if E.cursorY < len(E.rows) {
-			E.cursorX = len(E.rows[E.cursorY])
-		}
+		E.cursorX = E.screenCols - 1
 
 	case pageUp, pageDown:
 		var press int
 		if key == pageUp {
 			press = arrowUp
-
-			E.cursorY = E.rowOff
 		} else {
-			E.cursorY = E.rowOff + E.screenRows - 1
-			if E.cursorY > len(E.rows) {
-				E.cursorY = len(E.rows)
-			}
-
 			press = arrowDown
 		}
 
@@ -550,11 +406,6 @@ func main() {
 			return
 		}
 	}
-
-	E.screenRows -= 2
-
-	E.statusMsgTime = time.Now() // default time to current time
-	editorSetStatusMessage("HELP - CTRL-Q = quit")
 
 	for {
 		editorRefreshScreen()
