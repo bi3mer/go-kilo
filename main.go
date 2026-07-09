@@ -386,6 +386,15 @@ func editorDrawStatusBar(ab *strings.Builder) {
 	ab.WriteString("\r\n")
 }
 
+func editorDrawMessageBar(ab *strings.Builder) {
+	ab.WriteString("\x1b[K")
+
+	length := min(len(E.statusMsg), E.screenCols)
+	if time.Since(E.statusMsgTime).Seconds() < 5.0 {
+		ab.WriteString(E.statusMsg[:length])
+	}
+}
+
 func editorRefreshScreen() {
 	editorScroll()
 
@@ -396,6 +405,7 @@ func editorRefreshScreen() {
 
 	editorDrawRows(&ab)
 	editorDrawStatusBar(&ab)
+	editorDrawMessageBar(&ab)
 
 	// set cursor position
 	ab.WriteString(fmt.Sprintf("\x1b[%d;%dH", (E.cursorY-E.rowOff)+1, (E.rowX-E.colOff)+1))
@@ -406,10 +416,11 @@ func editorRefreshScreen() {
 }
 
 // TODO: make variadic once a caller needs formatted args:
-// func editorSetStatusMessage(format string, args ...any) {
-// 	E.statusMsg = fmt.Sprintf(format, args...)
-// 	E.statusMsgTime = time.Now()
-// }
+//
+//	func editorSetStatusMessage(format string, args ...any) {
+//		E.statusMsg = fmt.Sprintf(format, args...)
+//		E.statusMsgTime = time.Now()
+//	}
 func editorSetStatusMessage(msg string) {
 	E.statusMsg = msg
 	E.statusMsgTime = time.Now()
