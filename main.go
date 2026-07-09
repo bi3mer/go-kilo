@@ -19,6 +19,10 @@ const (
 )
 
 const (
+	backspace = 127
+)
+
+const (
 	arrowLeft = iota + 1000
 	arrowRight
 	arrowUp
@@ -87,6 +91,30 @@ func editorUpdateRow(row string) string {
 	return builder.String()
 }
 
+func editorRowInsertRune(row string, at int, r rune) string {
+	if at < 0 || at > len(row) {
+		at = len(row)
+	}
+
+	return row[:at] + string(r) + row[at:]
+}
+
+// ----------------------------------------------------------------------------
+// editor operations
+// ----------------------------------------------------------------------------
+
+func editorInsertRune(r rune) {
+	if E.cursorY == len(E.rows) {
+		E.rows = append(E.rows, string(r))
+		E.render = append(E.render, editorUpdateRow(string(r)))
+	} else {
+		E.rows[E.cursorY] = editorRowInsertRune(E.rows[E.cursorY], E.cursorX, r)
+		E.render[E.cursorY] = editorUpdateRow(E.rows[E.cursorY])
+	}
+
+	E.cursorX++
+}
+
 // ----------------------------------------------------------------------------
 // file i/o
 // ----------------------------------------------------------------------------
@@ -111,6 +139,32 @@ func editorOpen(fileName string) error {
 	}
 
 	return nil
+}
+
+func editorSave() {
+	if len(E.fileName) == 0 {
+		return
+	}
+
+	f, err := os.OpenFile(E.fileName, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		editorSetStatusMessage("Can't save! I/O error: %s", err)
+		return
+	}
+	defer f.Close()
+
+	data := strings.Join(E.rows, "\n") + "\n"
+	if err := f.Truncate(int64(len(data))); err != nil {
+		editorSetStatusMessage("Can't save! I/O error: %s", err)
+		return
+	}
+
+	if _, err := f.Write([]byte(data)); err != nil {
+		editorSetStatusMessage("Can't save! I/O error: %s", err)
+		return
+	}
+
+	editorSetStatusMessage("%d bytes written to disk", len(data))
 }
 
 // ----------------------------------------------------------------------------
@@ -415,14 +469,8 @@ func editorRefreshScreen() {
 	_, _ = os.Stdout.WriteString(ab.String())
 }
 
-// TODO: make variadic once a caller needs formatted args:
-//
-//	func editorSetStatusMessage(format string, args ...any) {
-//		E.statusMsg = fmt.Sprintf(format, args...)
-//		E.statusMsgTime = time.Now()
-//	}
-func editorSetStatusMessage(msg string) {
-	E.statusMsg = msg
+func editorSetStatusMessage(msg string, args ...any) {
+	E.statusMsg = fmt.Sprintf(msg, args...)
 	E.statusMsgTime = time.Now()
 }
 
@@ -472,11 +520,18 @@ func editorProcessKey() error {
 	}
 
 	switch key {
+	case '\r':
+		// todo
+
 	case int(ctrlKey('q')):
 		_, _ = os.Stdout.WriteString("\x1b[2J")
 		_, _ = os.Stdout.WriteString("\x1b[H")
 
 		return fmt.Errorf("user quit")
+
+	case ('s' & 0x1f):
+		editorSetStatusMessage("hi")
+		editorSave()
 
 	case homeKey:
 		E.cursorX = 0
@@ -485,6 +540,9 @@ func editorProcessKey() error {
 		if E.cursorY < len(E.rows) {
 			E.cursorX = len(E.rows[E.cursorY])
 		}
+
+	case backspace, int(ctrlKey('h')), delKey:
+		// todo
 
 	case pageUp, pageDown:
 		var press int
@@ -507,6 +565,16 @@ func editorProcessKey() error {
 
 	case arrowLeft, arrowRight, arrowDown, arrowUp:
 		editorMoveCursor(key)
+
+	case int(ctrlKey('l')), '\x1b':
+		// todo
+
+	default:
+		if key < 256 {
+			editorInsertRune(rune(key))
+		} else {
+			editorSetStatusMessage("Unhandled key: %d", key)
+		}
 	}
 
 	return nil
@@ -565,7 +633,7 @@ func main() {
 	E.screenRows -= 2
 
 	E.statusMsgTime = time.Now() // default time to current time
-	editorSetStatusMessage("HELP - CTRL-Q = quit")
+	editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit")
 
 	for {
 		editorRefreshScreen()
