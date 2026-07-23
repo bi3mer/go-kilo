@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go-kilo/internal"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -14,8 +15,9 @@ import (
 )
 
 const (
-	kiloVersion = "0.0.0"
-	tabLength   = 8
+	kiloVersion   = "0.0.0"
+	kiloTabLength = 8
+	kiloQuitTimes = 3
 )
 
 const (
@@ -46,6 +48,8 @@ type editorConfig struct {
 	screenRows    int
 	screenCols    int
 	fd            int
+	dirty         int
+	quitAttempts  int
 	state         *term.State
 	statusMsg     string
 	statusMsgTime time.Time
@@ -64,7 +68,7 @@ func editorRowCursorXToRenderX(row string, cx int) int {
 
 	for j := 0; j < cx; j++ {
 		if row[j] == '\t' {
-			rx += (tabLength - 1) - (rx % tabLength)
+			rx += (kiloTabLength - 1) - (rx % kiloTabLength)
 		}
 
 		rx++
@@ -80,7 +84,7 @@ func editorUpdateRow(row string) string {
 		if r == '\t' {
 			builder.WriteByte(' ')
 
-			for builder.Len()%tabLength != 0 {
+			for builder.Len()%kiloTabLength != 0 {
 				builder.WriteByte(' ')
 			}
 		} else {
@@ -99,6 +103,27 @@ func editorRowInsertRune(row string, at int, r rune) string {
 	return row[:at] + string(r) + row[at:]
 }
 
+func editorRowDelRune() {
+	row := &E.rows[E.cursorY]
+	if E.cursorX < 0 || E.cursorX >= len(*row) {
+		return
+	}
+
+	*row = (*row)[:E.cursorX] + (*row)[E.cursorX+1:]
+	E.render[E.cursorY] = editorUpdateRow(*row)
+	E.dirty++
+}
+
+func editorDelRow(at int) {
+	if at < 0 || at >= len(E.rows) {
+		return
+	}
+
+	E.rows = slices.Delete(E.rows, at, at+1)
+	E.render = slices.Delete(E.render, at, at+1)
+	E.dirty++
+}
+
 // ----------------------------------------------------------------------------
 // editor operations
 // ----------------------------------------------------------------------------
@@ -112,7 +137,19 @@ func editorInsertRune(r rune) {
 		E.render[E.cursorY] = editorUpdateRow(E.rows[E.cursorY])
 	}
 
+	E.dirty++
 	E.cursorX++
+}
+
+func editorDelRune() {
+	if E.cursorY >= len(E.rows) {
+		return
+	}
+
+	if E.cursorX > 0 {
+		E.cursorX--
+		editorRowDelRune()
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -164,6 +201,7 @@ func editorSave() {
 		return
 	}
 
+	E.dirty = 0
 	editorSetStatusMessage("%d bytes written to disk", len(data))
 }
 
@@ -407,26 +445,30 @@ func editorDrawStatusBar(ab *strings.Builder) {
 	ab.WriteString("\x1b[7m")
 
 	// draw file name
-	var length int
+	var temp strings.Builder
 	if E.fileName == "" {
-		ab.WriteString("[No Name]")
-		length = 9
+		temp.WriteString("[No Name]")
 	} else {
-		var temp strings.Builder
 		temp.WriteString(E.fileName)
 		temp.WriteString(" - ")
 		temp.WriteString(strconv.Itoa(len(E.rows)))
 		temp.WriteString(" lines")
-
-		length = min(E.screenCols, temp.Len())
-		ab.WriteString(temp.String()[:length])
 	}
 
+	if E.dirty > 0 {
+		temp.WriteString(" (modified)")
+	}
+
+	length := min(E.screenCols, temp.Len())
+	ab.WriteString(temp.String()[:length])
+
+	// draw lines
 	var lineCount strings.Builder
 	lineCount.WriteString(strconv.Itoa(E.cursorY + 1))
 	lineCount.WriteByte('/')
 	lineCount.WriteString(strconv.Itoa(len(E.rows)))
 
+	// draw bar
 	for i := range E.screenCols - length {
 		if i == E.screenCols-length-lineCount.Len() {
 			ab.WriteString(lineCount.String())
@@ -524,13 +566,18 @@ func editorProcessKey() error {
 		// todo
 
 	case int(ctrlKey('q')):
+		if E.dirty > 0 && E.quitAttempts < kiloQuitTimes {
+			E.quitAttempts++
+			editorSetStatusMessage("WARNING: File has unsaved changes. Press Ctrl-Q %d more times to quit.", kiloQuitTimes-E.quitAttempts)
+			return nil
+		}
+
 		_, _ = os.Stdout.WriteString("\x1b[2J")
 		_, _ = os.Stdout.WriteString("\x1b[H")
 
 		return fmt.Errorf("user quit")
 
 	case ('s' & 0x1f):
-		editorSetStatusMessage("hi")
 		editorSave()
 
 	case homeKey:
@@ -542,7 +589,11 @@ func editorProcessKey() error {
 		}
 
 	case backspace, int(ctrlKey('h')), delKey:
-		// todo
+		if key == delKey {
+			editorMoveCursor(arrowRight)
+		}
+
+		editorDelRune()
 
 	case pageUp, pageDown:
 		var press int
@@ -576,6 +627,8 @@ func editorProcessKey() error {
 			editorSetStatusMessage("Unhandled key: %d", key)
 		}
 	}
+
+	E.quitAttempts = 0
 
 	return nil
 }
